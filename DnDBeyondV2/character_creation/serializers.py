@@ -46,3 +46,8 @@ class CharacterSerializer(serializers.ModelSerializer):
         # Получаем пользователя из контекста запроса (request.user)
         validated_data['user'] = self.context['request'].user
         return super().create(validated_data)
+
+class CharacterDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Character
+        fields = '__all__' 

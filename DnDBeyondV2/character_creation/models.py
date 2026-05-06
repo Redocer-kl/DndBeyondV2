@@ -102,19 +102,36 @@ class Character(models.Model):
         return f"{self.name} ({self.char_class} {self.level})"
 
 class AIConceptLog(models.Model):
-    """Лог запросов к Ollama для отладки и истории"""
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    prompt = models.TextField()
-    ai_response = models.JSONField() # Храним сырой JSON от Ollama
+    STATUS_CHOICES = (
+        ('pending', 'В обработке'),
+        ('success', 'Успешно'),
+        ('error', 'Ошибка'),
+    )
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    concept = models.TextField() # То, что ввел юзер
+    prompt = models.TextField(blank=True, null=True)
+    ai_response = models.JSONField(blank=True, null=True)
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    error_message = models.TextField(blank=True, null=True)
+    character = models.ForeignKey('Character', on_delete=models.SET_NULL, null=True, blank=True) 
     created_at = models.DateTimeField(auto_now_add=True)
-
-from django.db import models
 
 class Race(models.Model):
     name = models.CharField(max_length=50, unique=True)
     rus_name = models.CharField(max_length=50, unique=True)
     speed = models.PositiveIntegerField(default=30)
     size = models.CharField(max_length=20, default="Medium")
+    
+    # Бонусы к характеристикам
+    str_bonus = models.IntegerField(default=0)
+    dex_bonus = models.IntegerField(default=0)
+    con_bonus = models.IntegerField(default=0)
+    int_bonus = models.IntegerField(default=0)
+    wis_bonus = models.IntegerField(default=0)
+    cha_bonus = models.IntegerField(default=0)
+    
     features = models.TextField(help_text="Расовые особенности")
 
     def __str__(self):

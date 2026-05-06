@@ -1,11 +1,10 @@
 import json
 import logging
-from .models import Character, Race, CharClass, AIConceptLog
+from character_creation.models import Character, Race, CharClass, AIConceptLog
 
 logger = logging.getLogger(__name__)
 
 class CharacterBuilder:
-    # Стандартный набор характеристик D&D 5e
     STANDARD_ARRAY = [15, 14, 13, 12, 10, 8]
 
     def __init__(self, user, ai_json_response, original_concept=""):
@@ -14,43 +13,43 @@ class CharacterBuilder:
         self.concept = original_concept
 
     def create_character(self):
-        """Основной метод сборки персонажа из JSON"""
-        
-        # 1. Получаем данные из справочников по именам (English)
         race_obj = Race.objects.filter(name__iexact=self.data.get('race')).first()
         class_obj = CharClass.objects.filter(name__iexact=self.data.get('char_class')).first()
 
-        # 2. Распределение характеристик по приоритетам
+        # 1. Распределяем базовые статы (Standard Array)
         stats = self._map_stats(self.data.get('stat_priority', []))
 
-        # 3. Создание инстанса персонажа
+        # 2. Применяем расовые бонусы (ЕЩЕ ДО создания объекта Character)
+        if race_obj:
+            stats['strength'] += race_obj.str_bonus
+            stats['dexterity'] += race_obj.dex_bonus
+            stats['constitution'] += race_obj.con_bonus
+            stats['intelligence'] += race_obj.int_bonus
+            stats['wisdom'] += race_obj.wis_bonus
+            stats['charisma'] += race_obj.cha_bonus
+
+        # 3. Создаем объект
         character = Character(
             user=self.user,
             name=self.data.get('name', 'Безымянный герой'),
             concept_origin=self.concept,
             backstory=self.data.get('backstory', ''),
-            
-            # Раса и класс
             race=race_obj.name if race_obj else self.data.get('race'),
             char_class=class_obj.name if class_obj else self.data.get('char_class'),
             subclass=self.data.get('subclass', ''),
             alignment=self.data.get('alignment', ''),
             background=self.data.get('background', ''),
-            
-            # Применение данных из БД расы/класса
             speed=race_obj.speed if race_obj else 30,
             size=race_obj.size if race_obj else "Medium",
             hit_die=class_obj.hit_die if class_obj else "1d8",
-            
-            # Характеристики
+            features=race_obj.features,
             **stats
         )
 
-        # 4. Авто-заполнение спасбросков на основе класса
         if class_obj:
             self._apply_saving_throws(character, class_obj.saving_throws)
 
-        # 5. Базовые расчеты
+        # Расчеты HP и AC уже учитывают модификаторы от итоговых (с бонусами) статов
         character.max_hp = self._calculate_start_hp(character)
         character.current_hp = character.max_hp
         character.armor_class = 10 + character.get_modifier(character.dexterity)

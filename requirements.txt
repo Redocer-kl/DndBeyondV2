@@ -5,3 +5,5 @@ Pillow
 requests
 python-dotenv
 ollama
+celery
+redis
