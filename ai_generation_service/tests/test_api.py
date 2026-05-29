@@ -4,7 +4,7 @@ from app.schemas import CharacterResponseSchema
 
 
 MOCK_OLLAMA_JSON = {
-    "name": "Алёшка",
+    "name": "Томлин",
     "race": "Halfling",
     "char_class": "Rogue",
     "subclass": "Thief",
