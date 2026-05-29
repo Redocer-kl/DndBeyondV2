@@ -1,15 +1,17 @@
+# app/main.py
 from fastapi import FastAPI, HTTPException, status
 from .schemas import CharacterGenerationRequest
-from .tasks import celery_app
+from .tasks import celery_app, generate_character_task 
 
 app = FastAPI(title="From Zero To Frog - AI Character Service")
 
 @app.post("/api/v1/generate", status_code=status.HTTP_202_ACCEPTED)
 async def start_generation(payload: CharacterGenerationRequest):
     """
-    Принимает концепт текста, запускает Celery задачу.
+    Принимает концепт текста, запускает Celery задачу через .delay()
     """
-    task = celery_app.send_task("tasks.generate_character_task", args=[payload.concept])
+    task = generate_character_task.delay(payload.concept) 
+    
     return {
         "task_id": task.id,
         "status": "pending",
@@ -18,9 +20,6 @@ async def start_generation(payload: CharacterGenerationRequest):
 
 @app.get("/api/v1/status/{task_id}")
 async def check_status(task_id: str):
-    """
-    Эндпоинт опроса статуса (polling) для фронтенда или Go бэкенда.
-    """
     res = celery_app.AsyncResult(task_id)
     
     if res.state == "PENDING":
@@ -35,5 +34,5 @@ async def check_status(task_id: str):
     elif res.state == "SUCCESS":
         return {
             "status": "success",
-            "character": res.result  # Здесь уже лежит полностью посчитанный персонаж
+            "character": res.result
         }

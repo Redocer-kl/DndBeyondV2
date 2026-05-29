@@ -32,17 +32,15 @@ RULES:
 
 RESPONSE FORMAT:
 {
-  "name": "Подходящее по расе имя на русском",
+  "name": "A racially appropriate name translated to Russian",
   "race": "Race in English",
   "char_class": "Class in English",
   "subclass": "Subclass in English or empty",
   "background": "Background in English",
   "alignment": "Alignment in English",
   "stat_priority": ["stat1", "stat2", "stat3", "stat4", "stat5", "stat6"],
-  "backstory": "История персонажа на русском (3-4 предложения)."
+  "backstory": "История персонажа на русском (5-6 предложения)."
 }
-
-USER CONSEPT: 
 """
 
 @celery_app.task(name="tasks.generate_character_task")

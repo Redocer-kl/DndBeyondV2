@@ -3,7 +3,7 @@ from typing import List, Optional, Dict
 from .data_maps import RACES_MAP, CLASSES_MAP
 
 class CharacterGenerationRequest(BaseModel):
-    concept: str = Field(..., example="Скрытный плут хафлинг, который вырос на улицах большого города.")
+    concept: str = Field(..., examples=["Скрытный плут хафлинг, который вырос на улицах большого города."])
 
 class CharacterResponseSchema(BaseModel):
     name: str
