@@ -1,14 +1,12 @@
-from celery import shared_task
+from celery import Celery
 import json
-import ollama
-from django.contrib.auth import get_user_model
-from .models import AIConceptLog
-from .services.ai_character import CharacterBuilder
+from ollama import Client
+from .config import settings
+from .schemas import CharacterResponseSchema
 
-User = get_user_model()
+celery_app = Celery("ai_tasks", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
 
 SYSTEM_PROMPT = """
-
 You are an expert Dungeon Master for D&D 5e.
 Your task: Analyze the user's character concept and return a STRICTLY valid JSON object.
 
@@ -45,41 +43,27 @@ RESPONSE FORMAT:
 }
 
 USER CONSEPT: 
-""" 
+"""
 
-@shared_task
-def generate_character_task(log_id, user_id, user_concept):
+@celery_app.task(name="tasks.generate_character_task")
+def generate_character_task(user_concept: str) -> dict:
     try:
-        log = AIConceptLog.objects.get(id=log_id)
-        user = User.objects.get(id=user_id)
+        client = Client(host=settings.OLLAMA_HOST)
+        full_prompt = f"{SYSTEM_PROMPT}\nUSER CONCEPT: {user_concept}"
         
-        full_prompt = f"{SYSTEM_PROMPT}\n{user_concept}"
+        response = client.generate(
+            model=settings.OLLAMA_MODEL, 
+            prompt=full_prompt, 
+            format='json'
+        )
         
-        log.prompt = full_prompt
-        log.save(update_fields=['prompt'])
-
-        response = ollama.generate(model='gemma2:9b', prompt=full_prompt, format='json')
+        char_data = json.loads(response['response'])
         
-        try:
-            char_data = json.loads(response['response'])
-        except json.JSONDecodeError:
-            log.status = 'error'
-            log.error_message = "AI returned invalid JSON"
-            log.save()
-            return
-            
-        log.ai_response = char_data
+        # Схема Pydantic сама выполнит всю математику CharacterBuilder!
+        validated_character = CharacterResponseSchema(**char_data)
         
-        builder = CharacterBuilder(user, char_data, user_concept)
-        character = builder.create_character()
+        # Возвращаем словарь — Celery сохранит его в Redis как результат выполнения задачи
+        return validated_character.model_dump()
         
-        log.character = character
-        log.status = 'success'
-        log.save()
-
     except Exception as e:
-        log = AIConceptLog.objects.filter(id=log_id).first()
-        if log:
-            log.status = 'error'
-            log.error_message = str(e)
-            log.save()
+        raise RuntimeError(f"Generation failed: {str(e)}")

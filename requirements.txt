@@ -1,9 +1,0 @@
-django
-djangorestframework
-django-cors-headers
-Pillow
-requests
-python-dotenv
-ollama
-celery
-redis
