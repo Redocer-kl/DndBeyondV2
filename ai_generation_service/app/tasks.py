@@ -56,12 +56,10 @@ def generate_character_task(user_concept: str) -> dict:
         )
         
         char_data = json.loads(response['response'])
-        
-        # Схема Pydantic сама выполнит всю математику CharacterBuilder!
         validated_character = CharacterResponseSchema(**char_data)
         
-        # Возвращаем словарь — Celery сохранит его в Redis как результат выполнения задачи
         return validated_character.model_dump()
         
     except Exception as e:
         raise RuntimeError(f"Generation failed: {str(e)}")
+
