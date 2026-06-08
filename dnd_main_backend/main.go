@@ -39,6 +39,7 @@ func main() {
 		protectedGroup.GET("/profile", handlers.GetProfile)
 		protectedGroup.GET("/characters", handlers.GetUserCharacters)
 		protectedGroup.PUT("/characters/:id", handlers.UpdateCharacter)
+		protectedGroup.POST("/generate", handlers.StartGeneration)
 	}
 
 	port := os.Getenv("PORT")

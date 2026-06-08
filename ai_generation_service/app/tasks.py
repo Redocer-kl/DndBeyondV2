@@ -4,7 +4,7 @@ from ollama import Client
 from .config import settings
 from .schemas import CharacterResponseSchema
 
-celery_app = Celery("ai_tasks", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+celery_app = Celery("ai_tasks", broker=settings.BROKER_URL)
 
 SYSTEM_PROMPT = """
 You are an expert Dungeon Master for D&D 5e.
@@ -44,7 +44,7 @@ RESPONSE FORMAT:
 """
 
 @celery_app.task(name="tasks.generate_character_task")
-def generate_character_task(user_concept: str) -> dict:
+def generate_character_task(log_id: int, user_id: int, user_concept: str) -> dict:
     try:
         client = Client(host=settings.OLLAMA_HOST)
         full_prompt = f"{SYSTEM_PROMPT}\nUSER CONCEPT: {user_concept}"
@@ -58,8 +58,12 @@ def generate_character_task(user_concept: str) -> dict:
         char_data = json.loads(response['response'])
         validated_character = CharacterResponseSchema(**char_data)
         
+        # TODO: Здесь в будущем будет логика подключения к PostgreSQL через SQLAlchemy/psycopg2,
+        # чтобы обновить запись лога (log_id) и создать персонажа для user_id.
+        
         return validated_character.model_dump()
         
     except Exception as e:
+        # TODO: Здесь в будущем будет логика записи статуса 'error' и текста ошибки в log_id
         raise RuntimeError(f"Generation failed: {str(e)}")
 

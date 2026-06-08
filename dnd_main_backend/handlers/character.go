@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"dndbeyondv2/dndbackend/config"
 	"dndbeyondv2/dndbackend/models"
+	"dndbeyondv2/dndbackend/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -101,4 +102,43 @@ func UpdateCharacter(c *gin.Context) {
 	config.DB.Save(&character)
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "character": character})
+}
+
+type GenerateInput struct {
+	Concept string `json:"concept" binding:"required"`
+}
+
+func StartGeneration(c *gin.Context) {
+	userID, _ := c.Get("userID")
+
+	var input GenerateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Поле concept обязательно"})
+		return
+	}
+
+	// Создаем лог со статусом pending в нашей БД
+	logEntry := models.AIConceptLog{
+		UserID:  userID.(uint),
+		Concept: input.Concept,
+		Status:  "pending",
+	}
+	if err := config.DB.Create(&logEntry).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка базы данных"})
+		return
+	}
+
+	// Отправляем задачу в RabbitMQ для Python-воркера
+	err := services.PublishTask(logEntry.ID, logEntry.UserID, logEntry.Concept)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось отправить задачу в очередь: " + err.Error()})
+		return
+	}
+
+	// Отдаем ответ фронтенду за несколько миллисекунд
+	c.JSON(http.StatusAccepted, gin.H{
+		"task_id": logEntry.ID,
+		"status":  "pending",
+		"message": "Генерация персонажа запущена через RabbitMQ",
+	})
 }

@@ -1,7 +1,7 @@
 import os
 
 class Settings:
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    BROKER_URL: str = os.getenv("BROKER_URL", "amqp://guest:guest@localhost:5672//")
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma2:9b")
 
