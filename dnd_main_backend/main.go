@@ -1,37 +1,51 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
+	"os"
+	"dndbeyondv2/dndbackend/config"
+	"dndbeyondv2/dndbackend/handlers"
+	"dndbeyondv2/dndbackend/middleware"
+
+	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
-type PingResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-}
-
 func main() {
-	mux := http.NewServeMux()
+	// Загружаем .env
+	if err := godotenv.Load(); err != nil {
+		log.Println("Предупреждение: .env файл не найден")
+	}
 
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "Привет! Основной бэкенд на Go работает.")
-	})
+	// Подключаем базу данных
+	config.ConnectDatabase()
 
-	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) {
-		response := PingResponse{
-			Status:  "success",
-			Message: "Понг!",
-		}
+	// Инициализируем Gin
+	r := gin.Default()
 
-		w.Header().Set("Content-Type", "application/json")
-		
-		json.NewEncoder(w).Encode(response)
-	})
+	// Публичные роуты (Auth)
+	authGroup := r.Group("/api/auth")
+	{
+		authGroup.POST("/register", handlers.Register)
+		authGroup.POST("/login", handlers.Login)
+		authGroup.POST("/logout", handlers.Logout)
+	}
 
-	port := ":8080"
-	fmt.Printf("🚀 Сервер запущен на http://localhost%s\n", port)
-	
-	log.Fatal(http.ListenAndServe(port, mux))
+	// Защищенные роуты (Требуют JWT)
+	protectedGroup := r.Group("/api")
+	protectedGroup.Use(middleware.AuthMiddleware())
+	{
+		protectedGroup.GET("/profile", handlers.GetProfile)
+		protectedGroup.GET("/characters", handlers.GetUserCharacters)
+		protectedGroup.PUT("/characters/:id", handlers.UpdateCharacter)
+	}
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	fmt.Printf("🚀 Основной бэкенд запущен на порту %s\n", port)
+	r.Run(":" + port)
 }
