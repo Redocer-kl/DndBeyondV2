@@ -58,12 +58,9 @@ def generate_character_task(log_id: int, user_id: int, user_concept: str) -> dic
         char_data = json.loads(response['response'])
         validated_character = CharacterResponseSchema(**char_data)
         
-        # TODO: Здесь в будущем будет логика подключения к PostgreSQL через SQLAlchemy/psycopg2,
-        # чтобы обновить запись лога (log_id) и создать персонажа для user_id.
         
         return validated_character.model_dump()
         
     except Exception as e:
-        # TODO: Здесь в будущем будет логика записи статуса 'error' и текста ошибки в log_id
         raise RuntimeError(f"Generation failed: {str(e)}")
 

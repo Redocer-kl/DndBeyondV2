@@ -62,6 +62,7 @@ type Character struct {
 	
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	IsDraft		 bool 	   `gorm:"bool" json:"is_draft"`
 }
 
 type AIConceptLog struct {

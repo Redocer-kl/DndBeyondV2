@@ -5,7 +5,8 @@ import (
 	"dndbeyondv2/dndbackend/config"
 	"dndbeyondv2/dndbackend/models"
 	"dndbeyondv2/dndbackend/services"
-
+	"encoding/json"
+	"fmt"
 	"github.com/gin-gonic/gin"
 )
 
@@ -109,36 +110,200 @@ type GenerateInput struct {
 }
 
 func StartGeneration(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	// Достаем userID из контекста (после AuthMiddleware)
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Пользователь не авторизован"})
+		return
+	}
+	userID := userIDVal.(uint)
 
-	var input GenerateInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	// Парсим концепт от фронтенда
+	var req struct {
+		Concept string `json:"concept"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Поле concept обязательно"})
 		return
 	}
 
-	// Создаем лог со статусом pending в нашей БД
+	// 1. Создаем пустую запись лога со статусом pending
 	logEntry := models.AIConceptLog{
-		UserID:  userID.(uint),
-		Concept: input.Concept,
+		UserID:  userID,
+		Concept: req.Concept,
 		Status:  "pending",
 	}
 	if err := config.DB.Create(&logEntry).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка базы данных"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось создать лог задачи"})
 		return
 	}
 
-	// Отправляем задачу в RabbitMQ для Python-воркера
-	err := services.PublishTask(logEntry.ID, logEntry.UserID, logEntry.Concept)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось отправить задачу в очередь: " + err.Error()})
+	// 2. Отправляем таску напрямую в RabbitMQ для Celery
+	// Передаем logEntry.ID — в твоем сервисе он запишется в заголовок "id" сообщения,
+	// благодаря чему ID задачи в Celery будет равен ID строки в нашей БД.
+	if err := services.PublishTask(logEntry.ID, userID, req.Concept); err != nil {
+		// Если RabbitMQ недоступен, сразу помечаем лог ошибкой, чтобы не зависал
+		config.DB.Model(&logEntry).Updates(models.AIConceptLog{
+			Status:       "error",
+			ErrorMessage: "Ошибка отправки в брокер: " + err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Брокер очередей недоступен"})
 		return
 	}
 
-	// Отдаем ответ фронтенду за несколько миллисекунд
+	// Отдаем фронту ID таски (он же ID лога) для последующего поллинга
 	c.JSON(http.StatusAccepted, gin.H{
 		"task_id": logEntry.ID,
 		"status":  "pending",
-		"message": "Генерация персонажа запущена через RabbitMQ",
+		"message": "Задача успешно отправлена в очередь Celery",
 	})
+}
+
+func GetGenerationStatus(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Пользователь не авторизован"})
+		return
+	}
+	userID := userIDVal.(uint)
+
+	logID := c.Param("id")
+
+	var logEntry models.AIConceptLog
+	if err := config.DB.Where("id = ? AND user_id = ?", logID, userID).First(&logEntry).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Задача не найдена"})
+		return
+	}
+
+	if logEntry.Status == "success" {
+		c.JSON(http.StatusOK, gin.H{"status": "success", "character_id": logEntry.CharacterID})
+		return
+	}
+	if logEntry.Status == "error" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": logEntry.ErrorMessage})
+		return
+	}
+
+	// ИСПОЛЬЗУЕМ ПЕРЕМЕННУЮ ИЗ КОНФИГА ВМЕСТО ХАРДКОДА
+	// config.AIServiceURL теперь равен "http://localhost:8081" (из .env)
+	fastApiURL := fmt.Sprintf("%s/api/v1/status/%d", config.AIServiceURL, logEntry.ID)
+	
+	resp, err := http.Get(fastApiURL)
+	if err != nil {
+		// Обязательно логируй ошибку в консоль бэкенда, чтобы видеть, если сеть отвалилась!
+		fmt.Printf("[ОШИБКА] Запрос к FastAPI провалился: %v\n", err)
+		c.JSON(http.StatusOK, gin.H{"status": "pending", "message": "ИИ-сервис временно недоступен..."})
+		return
+	}
+	defer resp.Body.Close()
+
+	var fastApiResp struct {
+		Status    string                 `json:"status"`
+		Error     string                 `json:"error"`
+		Character map[string]interface{} `json:"character"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&fastApiResp); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка парсинга ответа от Celery"})
+		return
+	}
+
+	switch fastApiResp.Status {
+	case "pending":
+		c.JSON(http.StatusOK, gin.H{"status": "pending", "message": "Оллама еще генерирует..."})
+		return
+
+	case "error":
+		config.DB.Model(&logEntry).Updates(models.AIConceptLog{
+			Status:       "error",
+			ErrorMessage: fastApiResp.Error,
+		})
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": fastApiResp.Error})
+		return
+
+	case "success":
+		chData := fastApiResp.Character
+
+		// Безопасные функции каста типов (числа из json парсятся в float64)
+		getInt := func(key string) int {
+			if val, ok := chData[key].(float64); ok {
+				return int(val)
+			}
+			return 0
+		}
+		getString := func(key string) string {
+			if val, ok := chData[key].(string); ok {
+				return val
+			}
+			return ""
+		}
+
+		// Собираем модель. Поле modifiers просто игнорируем, в модели Character его нет.
+		newChar := models.Character{
+			UserID:       logEntry.UserID,
+			Name:         getString("name"),
+			Race:         getString("race"),
+			CharClass:    getString("char_class"),
+			Subclass:     getString("subclass"),
+			Level:        getInt("level"),
+			Strength:     getInt("strength"),
+			Dexterity:    getInt("dexterity"),
+			Constitution: getInt("constitution"),
+			Intelligence: getInt("intelligence"),
+			Wisdom:       getInt("wisdom"),
+			Charisma:     getInt("charisma"),
+			ArmorClass:   getInt("armor_class"),
+			Speed:        getInt("speed"),
+			MaxHP:        getInt("max_hp"),
+			CurrentHP:    getInt("current_hp"),
+			HitDie:       getString("hit_die"),
+			Alignment:    getString("alignment"),
+			Background:   getString("background"),
+			Backstory:    getString("backstory"),
+			IsDraft:      true,
+		}
+
+		tx := config.DB.Begin()
+		if err := tx.Create(&newChar).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка сохранения персонажа в БД"})
+			return
+		}
+
+		logEntry.Status = "success"
+		logEntry.CharacterID = &newChar.ID
+		if err := tx.Save(&logEntry).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка обновления лога"})
+			return
+		}
+		tx.Commit()
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":       "success",
+			"character_id": newChar.ID,
+		})
+		return
+
+	default:
+		c.JSON(http.StatusOK, gin.H{"status": "pending"})
+		return
+	}
+}
+
+
+func GetCharacter(c *gin.Context) {
+	userID, _ := c.Get("userID")
+	charID := c.Param("id")
+
+	var character models.Character
+
+	// Запрашиваем персонажа, проверяя, что он принадлежит именно этому пользователю
+	if err := config.DB.Where("id = ? AND user_id = ?", charID, userID).First(&character).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Персонаж не найден или у вас нет к нему доступа"})
+		return
+	}
+
+	// Отдаем всю структуру со статами, расой, классом и историей
+	c.JSON(http.StatusOK, character)
 }
