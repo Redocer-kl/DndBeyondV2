@@ -62,4 +62,15 @@ type Character struct {
 	
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	IsDraft		 bool 	   `gorm:"bool" json:"is_draft"`
+}
+
+type AIConceptLog struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	UserID       uint      `json:"user_id"`
+	Concept      string    `gorm:"type:text;not null" json:"concept"`
+	Status       string    `gorm:"size:20;default:'pending'" json:"status"` // pending, success, error
+	ErrorMessage string    `gorm:"type:text" json:"error_message"`
+	CharacterID  *uint     `json:"character_id"` // Ссылка на созданного перса (может быть null)
+	CreatedAt    time.Time `json:"created_at"`
 }

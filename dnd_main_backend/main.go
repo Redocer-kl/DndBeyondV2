@@ -20,6 +20,7 @@ func main() {
 
 	// Подключаем базу данных
 	config.ConnectDatabase()
+	config.LoadConfig()
 
 	// Инициализируем Gin
 	r := gin.Default()
@@ -39,6 +40,9 @@ func main() {
 		protectedGroup.GET("/profile", handlers.GetProfile)
 		protectedGroup.GET("/characters", handlers.GetUserCharacters)
 		protectedGroup.PUT("/characters/:id", handlers.UpdateCharacter)
+		protectedGroup.POST("/generate", handlers.StartGeneration)
+		protectedGroup.GET("/generate/status/:id", handlers.GetGenerationStatus)
+		protectedGroup.GET("/characters/:id", handlers.GetCharacter) 
 	}
 
 	port := os.Getenv("PORT")

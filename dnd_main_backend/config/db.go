@@ -28,7 +28,7 @@ func ConnectDatabase() {
 	}
 
 	// Автомиграция (создание/обновление таблиц)
-	err = database.AutoMigrate(&models.User{}, &models.Character{})
+	err = database.AutoMigrate(&models.User{}, &models.Character{},  &models.AIConceptLog{})
 	if err != nil {
 		log.Fatal("Ошибка миграции: ", err)
 	}
